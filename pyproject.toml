@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibejam"
+version = "0.0.1"
+description = "A tiny personal-style GPT (vibejam) built on a nanoGPT-like Transformer."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Michelle Sun" }
+]
+dependencies = [
+  "torch",
+  "numpy",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vibejam*"]

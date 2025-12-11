@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class ModelConfig:
-    vocab_size: int
+    vocab_size: int     # must be set once dataset is known 
     block_size: int = 64
     n_embd: int = 64
     n_layer: int = 2
@@ -14,9 +14,11 @@ class ModelConfig:
 class TrainConfig:
     batch_size: int = 16
     learning_rate: float = 3e-4
-    max_iters: int = 500
-    eval_interval: int = 100
-    device: str = "cuda"  # will downgrade to "cpu" if no GPU
+    max_iters: int = 2000
+    eval_interval: int = 200
+    eval_iters: int = 50
+    device: str = "cuda"  # fallback to cpu at runtime if needed
+    ckpt_path: str | None = None # where to save model; None = don't save
 
 @dataclass
 class DataConfig:

@@ -38,6 +38,12 @@ class CharDataset:
         data = self.train_data if split == "train" else self.val_data
         block_size = self.cfg.block_size
 
+        # Safety: require data longer than block_size
+        if len(data) <= block_size + 1:
+            raise ValueError(
+                f"Data too short for split='{split}': "
+                f"{len(data)} tokens with block_size={block_size}."
+            )
         ix = torch.randint(0, len(data) - block_size, (batch_size,))
         x = torch.stack([data[i:i+block_size] for i in ix])
         y = torch.stack([data[i+1:i+block_size+1] for i in ix])
