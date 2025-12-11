@@ -14,4 +14,6 @@ data/raw/
 data/personal_corpus.txt
 checkpoints/
 outputs/
-EOF
+
+vibejam.egg-info/
+*.egg-info/
