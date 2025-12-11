@@ -85,7 +85,9 @@ def estimate_loss(model: GPTModel,
 def train_lm(text_path: str,
              model_cfg: ModelConfig,
              train_cfg: TrainConfig,
-             data_cfg: DataConfig) -> Tuple[GPTModel, CharDataset]:
+             data_cfg: DataConfig, 
+             resume_path: str | None = None, 
+             grad_clip: float | None = 1.0) -> Tuple[GPTModel, CharDataset]:
     """
     High level training function: 
     - loads text from file
@@ -120,6 +122,15 @@ def train_lm(text_path: str,
     print("[vibejam] Model config:", asdict(model_cfg))
     print("[vibejam] Train config:", asdict(train_cfg))
 
+    start_iters = 0 
+    if resume_path is not None: 
+        ckpt = torch.load(resume_path, map_location=device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        if "optimizer_state_dict" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        start_iter = ckpt.get("iter", 0)
+        print(f"[vibejam] Resumed from {resume_path} at iter {start_iter}")
+
     # 4) Training loop
     start_time = time.time()
     for it in range(train_cfg.max_iters): 
@@ -132,6 +143,8 @@ def train_lm(text_path: str,
         # backward
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        if grad_clip is not None and grad_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
 
         # logging
@@ -148,6 +161,8 @@ def train_lm(text_path: str,
     if train_cfg.ckpt_path is not None:
         ckpt = {
             "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "iter": it,
             "model_cfg": asdict(model_cfg),
             "train_cfg": asdict(train_cfg),
             "data_cfg": asdict(data_cfg),
