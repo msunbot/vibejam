@@ -157,6 +157,13 @@ def train_lm(text_path: str,
                 f"val {losses['val']:.3f} | "
                 f"time {elapsed:6.1f}s"
             )
+
+        if train_cfg.ckpt_path is not None and (it % train_cfg.eval_interval == 0) and it > 0:
+            from pathlib import Path
+            Path(train_cfg.ckpt_path).parent.mkdir(parents=True, exist_ok=True)
+            torch.save(ckpt, train_cfg.ckpt_path)
+            print(f"[vibejam] Checkpoint updated at iter {it}")
+
     # 5) Optional checkpoint
     if train_cfg.ckpt_path is not None:
         ckpt = {
@@ -166,7 +173,13 @@ def train_lm(text_path: str,
             "model_cfg": asdict(model_cfg),
             "train_cfg": asdict(train_cfg),
             "data_cfg": asdict(data_cfg),
+            "meta": {
+                "stoi": dataset.stoi,
+                "itos": dataset.itos,
+}
         }
+        from pathlib import Path
+        Path(train_cfg.ckpt_path).parent.mkdir(parents=True, exist_ok=True)
         torch.save(ckpt, train_cfg.ckpt_path)
         print(f"[vibejam] Saved checkpoint to {train_cfg.ckpt_path}")
     

@@ -49,3 +49,26 @@ class CharDataset:
         y = torch.stack([data[i+1:i+block_size+1] for i in ix])
 
         return x, y
+    
+class CharDatasetWithVocab:
+    """
+    Char dataset that uses a fixed vocab mapping (stoi/itos) instead of rebuilding it.
+    Unknown characters are dropped (or you can map them to a fallback).
+    """
+
+    def __init__(self, text: str, cfg: DataConfig, stoi: dict, itos: dict):
+        self.cfg = cfg
+        self.stoi = stoi
+        self.itos = itos
+        self.vocab_size = len(stoi)
+
+        ids = []
+        for c in text:
+            if c in self.stoi:
+                ids.append(self.stoi[c])
+            # else: drop unknown chars
+
+        data = torch.tensor(ids, dtype=torch.long)
+        n = int(cfg.train_frac * len(data))
+        self.train_data = data[:n]
+        self.val_data = data[n:]

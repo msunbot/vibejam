@@ -23,9 +23,9 @@ def rewrite_text(
     model: GPTModel,
     dataset: CharDataset,
     draft: str,
-    max_new_tokens: int = 400,
-    temperature: float = 0.8,
-    top_k: int | None = 50,
+    max_new_tokens: int = 600,
+    temperature: float = 0.7,
+    top_k: int | None = 40,
 ) -> str:
     """
     High-level rewrite API:
