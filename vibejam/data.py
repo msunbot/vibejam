@@ -57,6 +57,7 @@ class CharDatasetWithVocab:
     """
 
     def __init__(self, text: str, cfg: DataConfig, stoi: dict, itos: dict):
+        import torch
         self.cfg = cfg
         self.stoi = stoi
         self.itos = itos
@@ -66,9 +67,24 @@ class CharDatasetWithVocab:
         for c in text:
             if c in self.stoi:
                 ids.append(self.stoi[c])
-            # else: drop unknown chars
 
         data = torch.tensor(ids, dtype=torch.long)
         n = int(cfg.train_frac * len(data))
         self.train_data = data[:n]
         self.val_data = data[n:]
+
+    def get_batch(self, split: str, batch_size: int):
+        import torch
+        data = self.train_data if split == "train" else self.val_data
+        block_size = self.cfg.block_size
+
+        if len(data) <= block_size + 1:
+            raise ValueError(
+                f"Data too short for split='{split}': {len(data)} tokens "
+                f"with block_size={block_size}."
+            )
+
+        ix = torch.randint(0, len(data) - block_size, (batch_size,))
+        x = torch.stack([data[i:i+block_size] for i in ix])
+        y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+        return x, y
