@@ -3,9 +3,19 @@ from pathlib import Path
 import torch
 
 from vibejam.config import ModelConfig, TrainConfig, DataConfig
-from vibejam.data import CharDataset
+from vibejam.data import CharDataset, CharDatasetWithVocab
 from vibejam.model import GPTModel
 from vibejam.train import get_device, estimate_loss, get_batch
+
+# Build base vocab from original corpus (guarantees vocab_size=645)
+base_text = Path("data/personal_corpus.txt").read_text(encoding="utf-8")
+base_vocab_ds = CharDataset(base_text, data_cfg)
+stoi, itos = base_vocab_ds.stoi, base_vocab_ds.itos
+
+# Build rewrite-pairs dataset using fixed vocab
+pairs_text = Path(args.pairs_path).read_text(encoding="utf-8")
+dataset = CharDatasetWithVocab(pairs_text, data_cfg, stoi=stoi, itos=itos)
+print("[vibejam] rewrite-pairs vocab_size (forced):", dataset.vocab_size)
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -46,7 +56,7 @@ def main():
     # Since we rebuild vocab from rewrite_pairs, it MUST contain the same character set as base training.
     # If it doesn't, you should generate pairs from the same corpus to keep char set consistent.
     model_cfg = ModelConfig(
-        vocab_size=dataset.vocab_size,
+        vocab_size=dataset.vocab_size, # now 645
         block_size=args.block_size,
         n_embd=base_model_cfg.n_embd,
         n_layer=base_model_cfg.n_layer,
@@ -57,7 +67,7 @@ def main():
     model = GPTModel(model_cfg).to(device)
 
     # Load weights from base ckpt (works if vocab_size is identical; otherwise head shape mismatch)
-    missing, unexpected = model.load_state_dict(base["model_state_dict"], strict=False)
+    missing, unexpected = model.load_state_dict(base["model_state_dict"], strict=True)
     if missing or unexpected:
         print("[vibejam] load_state_dict notes:")
         print("  missing:", missing)
