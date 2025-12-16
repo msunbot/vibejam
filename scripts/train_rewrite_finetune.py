@@ -3,9 +3,12 @@ from pathlib import Path
 import torch
 
 from vibejam.config import ModelConfig, TrainConfig, DataConfig
-from vibejam.data import CharDataset, CharDatasetWithVocab
+from vibejam.data import CharDataset, CharDatasetWithVocab, TokenDataset
 from vibejam.model import GPTModel
 from vibejam.train import estimate_loss, get_batch
+
+from vibejam.tokenizer_bpe import BPETokenizer
+from vibejam.tokenizer_char import CharTokenizer
 
 
 def parse_args():
@@ -14,7 +17,9 @@ def parse_args():
     p.add_argument("--base-ckpt", type=str, required=True, help="pretrained LM ckpt")
     p.add_argument("--out-ckpt", type=str, required=True, help="fine-tuned ckpt path")
 
-    p.add_argument("--block-size", type=int, default=128)
+    # If not provided, we will default to base checkpoint block_size for compatibility.
+    p.add_argument("--block-size", type=int, default=None)
+
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--max-iters", type=int, default=3000)
@@ -23,7 +28,12 @@ def parse_args():
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--device", type=str, default="cuda")
 
-    # IMPORTANT: we need the original corpus to rebuild the same char vocab as the base LM
+    # Tokenizer selection
+    p.add_argument("--tokenizer-type", type=str, default="char", choices=["char", "bpe"])
+    p.add_argument("--tokenizer-path", type=str, default="", help="Required for --tokenizer-type bpe")
+    p.add_argument("--vocab-path", type=str, default="checkpoints/vibejam_vocab.json", help="Used for char runs")
+
+    # For char runs: used to rebuild the same vocab if vocab_path is missing
     p.add_argument("--corpus-path", type=str, default="data/personal_corpus.txt")
 
     return p.parse_args()
@@ -39,24 +49,61 @@ def main():
     base = torch.load(args.base_ckpt, map_location="cpu")
     base_model_cfg = ModelConfig(**base["model_cfg"])
 
+    # Default block_size to base checkpoint block_size (must match for strict load)
+    block_size = args.block_size if args.block_size is not None else base_model_cfg.block_size
+    if block_size != base_model_cfg.block_size:
+        raise ValueError(
+            f"block_size mismatch: base_ckpt block_size={base_model_cfg.block_size} but you set {block_size}. "
+            f"Use --block-size {base_model_cfg.block_size} or omit --block-size."
+        )
+
     # Data config for finetune dataset windows
-    data_cfg = DataConfig(block_size=args.block_size, train_frac=0.95)
+    data_cfg = DataConfig(block_size=block_size, train_frac=0.95)
 
-    # 1) Build the *base vocab* from the original corpus (ensures vocab_size matches base checkpoint)
-    base_text = Path(args.corpus_path).read_text(encoding="utf-8")
-    base_vocab_ds = CharDataset(base_text, data_cfg)
-    stoi, itos = base_vocab_ds.stoi, base_vocab_ds.itos
-    print("[vibejam] Base vocab_size:", len(stoi))
-
-    # 2) Build rewrite-pairs dataset using the *same vocab*
+    # 1) Build dataset (char or bpe)
     pairs_text = Path(args.pairs_path).read_text(encoding="utf-8")
-    dataset = CharDatasetWithVocab(pairs_text, data_cfg, stoi=stoi, itos=itos)
-    print("[vibejam] rewrite-pairs vocab_size (forced):", dataset.vocab_size)
 
-    # 3) Build model with base architecture, but vocab_size MUST match base (645)
+    tokenizer_meta = {"tokenizer_type": args.tokenizer_type}
+
+    if args.tokenizer_type == "bpe":
+        if not args.tokenizer_path:
+            raise ValueError("--tokenizer-path is required when --tokenizer-type bpe")
+
+        tok = BPETokenizer.load(args.tokenizer_path)
+        tokenizer_meta["tokenizer_path"] = args.tokenizer_path
+        tokenizer_meta["vocab_size"] = tok.vocab_size
+
+        dataset = TokenDataset(pairs_text, data_cfg, tok)
+        print("[vibejam] BPE finetune dataset vocab_size:", dataset.vocab_size)
+
+    else:
+        # Char mode: prefer loading persisted vocab mapping for exact alignment
+        if Path(args.vocab_path).exists():
+            tok = CharTokenizer.load(args.vocab_path)
+            tokenizer_meta["vocab_path"] = args.vocab_path
+            stoi, itos = tok.stoi, tok.itos
+            print("[vibejam] Loaded char vocab from:", args.vocab_path)
+        else:
+            # Fallback: rebuild vocab from corpus (older behavior)
+            base_text = Path(args.corpus_path).read_text(encoding="utf-8")
+            base_vocab_ds = CharDataset(base_text, data_cfg)
+            stoi, itos = base_vocab_ds.stoi, base_vocab_ds.itos
+            print("[vibejam] Rebuilt char vocab from corpus; vocab_size:", len(stoi))
+
+        dataset = CharDatasetWithVocab(pairs_text, data_cfg, stoi=stoi, itos=itos)
+        print("[vibejam] Char finetune dataset vocab_size (forced):", dataset.vocab_size)
+
+    # 2) Build model with base architecture; vocab_size MUST match base checkpoint
+    if dataset.vocab_size != base_model_cfg.vocab_size:
+        raise ValueError(
+            f"vocab_size mismatch: base_ckpt vocab_size={base_model_cfg.vocab_size} "
+            f"but dataset vocab_size={dataset.vocab_size}. "
+            f"Check tokenizer artifacts and dataset construction."
+        )
+
     model_cfg = ModelConfig(
         vocab_size=dataset.vocab_size,
-        block_size=args.block_size,
+        block_size=block_size,
         n_embd=base_model_cfg.n_embd,
         n_layer=base_model_cfg.n_layer,
         n_head=base_model_cfg.n_head,
@@ -64,7 +111,7 @@ def main():
     )
     model = GPTModel(model_cfg).to(device)
 
-    # Now vocab_size matches, strict load works
+    # Strict load should work (same vocab_size, same block_size, same architecture)
     model.load_state_dict(base["model_state_dict"], strict=True)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -107,6 +154,7 @@ def main():
                 "model_cfg": model_cfg.__dict__,
                 "train_cfg": train_cfg.__dict__,
                 "data_cfg": data_cfg.__dict__,
+                "tokenizer": tokenizer_meta,
             }
             torch.save(ckpt, args.out_ckpt)
             print(f"[vibejam] Saved finetune ckpt: {args.out_ckpt}")

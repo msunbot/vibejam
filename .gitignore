@@ -9,11 +9,15 @@ __pycache__/
 # OS
 .DS_Store
 
-# Data & artifacts
-data/raw/
-data/personal_corpus.txt
+# Checkpoints / artifacts
 checkpoints/
-outputs/
+*.pt
+
+# Data (handled explicitly below)
+data/personal_corpus.txt
+data/rewrite_pairs.txt
+data/rewrite_drafts*.jsonl
+data/raw/
 
 vibejam.egg-info/
-*.egg-info/
+*.egg-info/.DS_Store
