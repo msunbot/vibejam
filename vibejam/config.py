@@ -24,3 +24,8 @@ class TrainConfig:
 class DataConfig:
     block_size: int = 64
     train_frac: float = 0.9
+
+    # Tokenization controls
+    tokenizer_type: str = "char"  # "char" or "bpe"
+    tokenizer_path: str = ""      # used if tokenizer_type == "bpe"
+    vocab_path: str = "checkpoints/vibejam_vocab.json"  # used if tokenizer_type == "char"

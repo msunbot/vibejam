@@ -1,47 +1,63 @@
 # vibejam  
-*A tiny personal-style GPT, built from scratch on a nanoGPT-style Transformer.*
+*A tiny personal-style language model, built from scratch.*
 
 vibejam is a small, educational language model that learns from your own writing and acts as a **“last-mile style engine”** on top of larger LLMs.
 
-Layer 1 focuses on:
+It is intentionally minimal and transparent, designed to deepen intuition about the *entire* language model stack — from tokenization to training to inference — rather than to maximize output quality.
 
-- training a small decoder-only Transformer on your personal text, and  
-- providing:  
-  - **LM mode** → generate text in your general “voice”  
-  - **rewrite mode v0** → take a draft and rewrite it in your style (prototype)
+---
 
-It is intentionally minimal: just PyTorch, a char-level tokenizer, and clean scripts.
+## What vibejam is
+
+At its core, vibejam is:
+
+- a decoder-only Transformer trained from scratch in PyTorch  
+- a controllable pipeline for learning personal writing style  
+- a systems-first ML project that treats tokenization, datasets, and checkpoints as first-class artifacts  
+
+It supports two operating modes:
+
+- **LM mode** → generate text in your general “voice”  
+- **Rewrite mode (v0)** → take a draft and rewrite it in your style (prototype)
 
 ---
 
 ## Why vibejam exists
 
-**As a product seed**
+### As a product seed
 
-- A lightweight “style engine” that can sit behind GPT-4 / Claude:
-  - Big LLM handles reasoning and semantics.
-  - vibejam adapts that content to your tone and cadence.
+vibejam is a prototype for a lightweight “style engine” that could sit behind large LLMs:
 
-**As a learning artifact**
+- A large LLM (GPT-4, Claude, etc.) handles reasoning and semantics  
+- vibejam adapts that content to your tone, cadence, and structure  
 
-- A fully transparent Transformer implementation to deepen intuition about:
-  - token/position embeddings  
-  - causal self-attention  
-  - residual blocks + LayerNorm  
-  - next-token prediction training loops  
-  - ML engineering patterns: configs, CLIs, checkpoints, sampling
+The hypothesis is that *style* can be modeled locally and cheaply, without retraining a full-scale model.
+
+### As a learning artifact
+
+vibejam is also a deliberately transparent implementation of a language model stack, meant to build intuition about:
+
+- tokenization (char-level vs BPE)  
+- token and positional embeddings  
+- causal self-attention  
+- residual blocks and LayerNorm  
+- next-token prediction training loops  
+- ML engineering patterns: configs, CLIs, checkpoints, resumption  
 
 ---
 
-## Features (Layer 1 v0)
+## Features (Layer 1 + 1.5)
 
-- nanoGPT-style Transformer LM (decoder-only, causal self-attention)
-- Char-level tokenizer for simplicity and transparency
-- Configurable training pipeline (`train_lm`)
-- Checkpoint saving with model + configs
-- Sampling API (`generate_text`) with temperature and top-k
-- Rewrite mode v0 (`rewrite_text`) using an instruction-style prompt
-- Folder-to-corpus ingestion (`prepare_data`)
+- Decoder-only Transformer (nanoGPT-style)
+- Explicit tokenization layer:
+  - CharTokenizer (legacy / educational)
+  - BPETokenizer (byte-level, persisted artifact)
+- Tokenizer-agnostic dataset abstraction (TokenDataset)
+- Configurable training pipeline (train_lm)
+- Periodic checkpointing with full config + tokenizer metadata
+- Sampling API with temperature and top-k
+- Rewrite mode v0 with instruction-style prompt and stop token
+- CLI-first workflow for training, sampling, and rewriting
 
 ---
 
@@ -50,29 +66,27 @@ It is intentionally minimal: just PyTorch, a char-level tokenizer, and clean scr
     vibejam/
       README.md
       PROGRESS.md
-      pyproject.toml
-      requirements.txt
-      .gitignore
+      docs/
+        architecture.md
+        lessons-learned.md
 
       vibejam/
-        __init__.py
-        config.py       (ModelConfig, TrainConfig, DataConfig)
-        data.py         (CharDataset + batch sampling)
-        model.py        (GPTModel: Transformer LM)
-        train.py        (train_lm, estimate_loss)
-        sample.py       (generate_text)
-        rewrite.py      (rewrite_text + prompt template)
+        config.py        (ModelConfig, TrainConfig, DataConfig)
+        data.py          (CharDataset, TokenDataset)
+        tokenizer_char.py
+        tokenizer_bpe.py
+        model.py         (GPTModel)
+        train.py         (training loop, checkpointing)
+        sample.py        (sampling utilities)
+        rewrite.py       (rewrite logic + prompt)
 
       scripts/
-        prepare_data.py     (raw folder → single corpus file)
-        train_lm.py         (CLI wrapper for train_lm)
-        sample_lm.py        (CLI for sampling)
-        rewrite_demo.py     (CLI for rewrite mode)
-
-      notebooks/
-        01_toy_transformer.ipynb
-        02_train_personal_lm.ipynb
-        03_rewrite_in_my_voice.ipynb
+        train_tokenizer_bpe.py
+        prepare_rewrite_pairs.py
+        train_lm.py
+        train_rewrite_finetune.py
+        sample_lm.py
+        rewrite_demo.py
 
 ---
 
@@ -90,168 +104,120 @@ Requires Python 3.9+ and PyTorch.
 
 ### 1. Build a personal text corpus
 
-1. Put your `.txt` / `.md` files under `data/raw/`.  
-2. Run:
+Put your .txt / .md files under data/raw/, then run:
 
-       python -m scripts.prepare_data \
-         --input-dir data/raw \
-         --out-path data/personal_corpus.txt
+    python -m scripts.prepare_data \
+      --input-dir data/raw \
+      --out-path data/personal_corpus.txt
 
-This writes a single `data/personal_corpus.txt` with `<|doc_end|>` separators between documents.
+This produces a single corpus file with document separators.
 
 ---
 
-### 2. Train a small LM on your corpus
+### 2. Train a BPE tokenizer
 
-Train on CPU or GPU (GPU is auto-detected if available):
+    python scripts.train_tokenizer_bpe.py \
+      --corpus-path data/personal_corpus.txt \
+      --out checkpoints/vibejam_tokenizer_bpe.json
 
-    python -m scripts.train_lm \
+This creates a persisted tokenizer artifact that is reused across training and inference.
+
+---
+
+### 3. Train a base language model (BPE)
+
+    python scripts.train_lm.py \
       --text-path data/personal_corpus.txt \
-      --ckpt-path checkpoints/vibejam_personal.pt
+      --ckpt-path checkpoints/vibejam_bpe_personal.pt \
+      --block-size 128 \
+      --tokenizer-type bpe \
+      --tokenizer-path checkpoints/vibejam_tokenizer_bpe.json
 
-Defaults (configured via `TrainConfig` / `DataConfig`):
-
-- char-level tokenizer  
-- small Transformer (2 layers, 64-dim embeddings, 4 heads)  
-- configurable `block_size` (context length)  
-- periodic train/val loss logging  
-- checkpoint with model weights + configs saved to `--ckpt-path`
-
-To train on Colab GPU:
-
-- Enable GPU runtime.  
-- Clone the repo in the notebook.  
-- Run the same `train_lm` command.
+This trains a small Transformer from scratch using BPE tokenization.
 
 ---
 
-### 3. Generate text from your model
+### 4. Generate text
 
     python -m scripts.sample_lm \
       --text-path data/personal_corpus.txt \
-      --ckpt-path checkpoints/vibejam_personal.pt \
+      --ckpt-path checkpoints/vibejam_bpe_personal.pt \
+      --tokenizer-type bpe \
+      --tokenizer-path checkpoints/vibejam_tokenizer_bpe.json \
       --prompt "Today I feel"
 
-Options:
-
-- `--max-new-tokens` (length of continuation)  
-- `--temperature`:
-  - < 1.0 → more deterministic
-  - > 1.0 → more random/creative  
-- `--top-k` to restrict sampling to the top-k tokens
+Sampling supports temperature and top-k for controllable generation.
 
 ---
 
-### 4. Rewrite text in your voice (v0)
+### 5. Rewrite text in your voice (v0)
 
     python -m scripts.rewrite_demo \
       --text-path data/personal_corpus.txt \
-      --ckpt-path checkpoints/vibejam_personal.pt \
+      --ckpt-path checkpoints/vibejam_bpe_personal.pt \
+      --tokenizer-type bpe \
+      --tokenizer-path checkpoints/vibejam_tokenizer_bpe.json \
       --draft "Today I went for a walk and felt good about the progress on my project."
 
-What happens:
+Rewrite mode wraps the draft into a structured instruction prompt and returns the model’s continuation after the Rewrite section.
 
-- `rewrite_demo.py`:
-  - reloads model + configs from checkpoint
-  - rebuilds `CharDataset` to get vocab/encode/decode
-  - calls `rewrite_text(...)` with your draft
-
-- `rewrite_text(...)`:
-  - wraps the draft into an instruction prompt:
-
-        Below is some draft text. Rewrite it in my usual style, keeping the same meaning but using my tone and cadence.
-
-        Draft:
-        <draft>
-
-        Rewrite:
-
-  - generates a continuation  
-  - returns the text after `"Rewrite:\n"` as the rewritten output
-
-Note: with a small char-level model and no explicit Draft→Rewrite fine-tuning, outputs are prototype-grade and often noisy. The goal in v0 is to validate the architecture and end-to-end flow.
+Outputs are prototype-grade; the goal is validating the end-to-end pipeline rather than producing polished rewrites.
 
 ---
 
 ## Design decisions & tradeoffs
 
-**Char-level tokenizer (for v0)**
+### Tokenization
 
-- Pros:
-  - simple and easy to reason about  
-  - no external tokenizer dependencies  
-  - direct mapping from IDs to characters  
+- Char-level tokenization was used initially for transparency and learning.
+- BPE was introduced in Layer 1.5 to improve semantic modeling and efficiency.
+- Tokenizers are treated as persisted artifacts, not implicit preprocessing steps.
 
-- Cons:
-  - large vocab (hundreds of characters)  
-  - longer sequences needed to represent semantics  
-  - outputs tend to “semi-English babble” at this scale
+### Model scale
 
-**Small Transformer**
+- The default model is intentionally small and CPU-friendly.
+- This makes failures understandable and iteration fast.
+- The project optimizes for learning, not benchmark performance.
 
-- 2 layers, 64-dim embeddings, 4 heads by default.  
-- Easy to train on CPU / Colab and to inspect.  
-- Intentionally underpowered for production; ideal for learning and iteration.
+### Objective
 
-**Pure next-token prediction**
-
-- Both LM mode and rewrite mode v0 share the same objective.  
-- No special loss term for rewrite; behavior is driven entirely by how we format the text.
-
-**CLI-first workflow**
-
-- Training, sampling, and rewriting are simple CLI commands.  
-- Notebooks are used for experiments, not as the primary API surface.
+- Pure next-token prediction throughout.
+- Rewrite behavior emerges from prompt formatting and (optionally) fine-tuning.
 
 ---
 
-## Limitations (current v0)
+## Limitations (v0.1)
 
-- Char-level modeling; no BPE/tokenizer model yet.  
-- Short context compared to “real” LLMs; rewrite only sees local context.  
-- Rewrite mode is not fine-tuned on actual Draft→Rewrite pairs.  
-- Model is small; style is captured locally rather than globally.
+- Rewrite mode is not yet fine-tuned on Draft→Rewrite pairs using BPE.
+- Context length is short compared to large LLMs.
+- Output quality is uneven at this scale.
 
-This is deliberate: Layer 1 is about building and understanding a complete stack, not maximizing output quality.
+These are deliberate tradeoffs for an early, learning-focused release.
 
 ---
 
 ## Roadmap
 
-**Layer 1.5 — Stronger style modeling**
+### Layer 1.5+
+- BPE rewrite fine-tuning on Draft→Rewrite datasets
+- Larger context windows and longer training runs (GPU)
 
-- Retrain on GPU with:
-  - larger `block_size` (64–128)  
-  - more layers / larger embeddings  
-  - more training steps  
-- Introduce a BPE tokenizer backend for better semantics and efficiency.  
-- Build a (draft, rewrite) dataset and add `train_rewrite_finetune.py` for instruction-style fine-tuning.
+### Layer 2
+- Introduce a BaseLM interface and model factory
+- Clean integration with external LLMs as a style adapter
 
-**Layer 2 — Model interface & big LLM integration**
-
-- Introduce `BaseLM` and `build_model(arch=...)` to support multiple architectures.  
-- Wrap vibejam into a `StyleEngine`:
-  - big LLM (GPT-4, Claude, etc.) generates content  
-  - vibejam adapts it to your voice  
-
-**Layer 3 — Labs**
-
-- Use vibejam’s training harness to experiment with:
-  - Mamba  
-  - gated attention  
-  - xLSTM  
-  - nested / continual learning ideas on personal style data  
+### Layer 3 (Labs)
+- Alternative architectures (Mamba, gated models, etc.)
+- Experiments in continual and nested learning on personal data
 
 ---
 
 ## Progress
 
-For a detailed, day-by-day breakdown of the work (including debugging, design choices, and learnings), see:
-
-- `PROGRESS.md`
+See PROGRESS.md for a detailed, day-by-day account of development, debugging, and lessons learned.
 
 ---
 
 ## License
 
-MIT (or update to your preferred license).
+MIT (or update as desired).

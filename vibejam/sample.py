@@ -14,6 +14,7 @@ def generate_text(
     max_new_tokens: int = 200,
     temperature: float = 1.0,
     top_k: int | None = None,
+    stop_str: str | None = None
 ) -> str:
     """
     Generate text from the model, conditioned on a text prompt.
@@ -54,4 +55,11 @@ def generate_text(
         idx = torch.cat([idx, next_token], dim=1)
 
     out_ids = idx[0].tolist()
-    return dataset.decode(out_ids)
+    text = dataset.decode(out_ids)
+
+    if stop_str:
+        j = text.find(stop_str)
+        if j != -1: 
+            text = text[: j + len(stop_str)]
+
+    return text

@@ -3,6 +3,7 @@
 import argparse
 from vibejam.config import ModelConfig, TrainConfig, DataConfig
 from vibejam.train import train_lm
+from vibejam.train import load_dataset_from_file  # Make sure this import exists
 
 
 def parse_args():
@@ -30,6 +31,9 @@ def parse_args():
     p.add_argument("--eval-iters", type=int, default=50)
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--grad-clip", type=float, default=1.0)
+    p.add_argument("--tokenizer-type", type=str, default="char", choices=["char", "bpe"])
+    p.add_argument("--tokenizer-path", type=str, default="")
+    p.add_argument("--vocab-path", type=str, default="checkpoints/vibejam_vocab.json")
 
     return p.parse_args()
 
@@ -37,11 +41,21 @@ def parse_args():
 def main():
     args = parse_args()
 
-    data_cfg = DataConfig(block_size=args.block_size, train_frac=args.train_frac)
+    # Data configuration
+    data_cfg = DataConfig(
+        block_size=args.block_size,
+        train_frac=args.train_frac,
+        tokenizer_type=args.tokenizer_type,
+        tokenizer_path=args.tokenizer_path,
+        vocab_path=args.vocab_path,
+    )
 
-    # vocab_size will be set inside train_lm after dataset loads
+    # 1) Load dataset FIRST (so we can get vocab_size)
+    dataset = load_dataset_from_file(args.text_path, data_cfg)
+    
+    # 2) Now that dataset is loaded, we can construct model config
     model_cfg = ModelConfig(
-        vocab_size=0,
+        vocab_size=dataset.vocab_size,  # Now it's defined
         block_size=data_cfg.block_size,
         n_embd=args.n_embd,
         n_layer=args.n_layer,
@@ -49,6 +63,7 @@ def main():
         dropout=args.dropout,
     )
 
+    # 3) Train configuration
     train_cfg = TrainConfig(
         batch_size=args.batch_size,
         learning_rate=args.lr,
@@ -59,7 +74,7 @@ def main():
         ckpt_path=args.ckpt_path,
     )
 
-    # we’ll thread grad_clip into train_lm next
+    # Train the model
     train_lm(
         text_path=args.text_path,
         model_cfg=model_cfg,

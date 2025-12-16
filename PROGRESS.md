@@ -204,3 +204,182 @@
       - Nested learning / continual learning setups on personal style data
 - [ ] Use the existing trainer/data pipeline as the common evaluation harness
       (same corpus, same loss metrics, different architectures).
+
+---
+## Week 2: Layer 1.5 — System Correctness & BPE Migration (Days 7–10)
+---
+
+### Day 7 (Dec 16) — System Correctness & Failure Debugging ✅  
+**Phase 3 → Phase 4 — Making the Pipeline Correct**
+
+- [x] Diagnosed and fixed multiple *structural* failures unrelated to model quality:
+  - Tokenizer/vocab mismatch between training and inference
+  - Prompt/template leakage between rewrite training data and inference prompts
+  - Block size mismatch causing positional embedding incompatibility
+  - Invalid JSON inputs due to smart quotes masquerading as valid JSON
+  - Config wiring issues where assumptions leaked across layers
+- [x] Enforced a single canonical rewrite format:
+  - `Draft:` → `Rewrite:` → `<|end|>`
+  - Ensured this format was used consistently in:
+    - rewrite-pair generation
+    - fine-tuning data
+    - inference prompt
+    - extraction logic
+- [x] Refactored rewrite pipeline so that:
+  - stop tokens are respected
+  - only the intended rewrite span is returned
+- [x] Verified that remaining rewrite quality issues were due to char-level modeling, not bugs  
+
+**Result:**  
+A fully correct end-to-end system where failures were explainable and reproducible.  
+No remaining “mystery bugs” in the rewrite path.
+
+**Key Learnings:**
+- Most early ML failures are *systems bugs*, not learning bugs.
+- Prompt format is training data; mismatch guarantees garbage output.
+- Token IDs are part of the model contract, not a preprocessing detail.
+
+---
+
+### Day 8 (Dec 16) — Tokenization as a First-Class Artifact (BPE Prep) ✅  
+**Phase 4 — Tokenizer Abstraction**
+
+- [x] Cleanly separated responsibilities:
+  - Tokenizer → Dataset → Model → Training loop
+- [x] Introduced `TokenDataset`, making datasets tokenizer-agnostic
+- [x] Implemented a byte-level BPE tokenizer from scratch:
+  - Learned merges from corpus
+  - Guaranteed coverage via byte fallback
+  - Persisted tokenizer artifact (`tokenizer_bpe.json`)
+- [x] Updated data pipeline to support:
+  - Char-level tokenization (legacy)
+  - BPE tokenization (Layer 1.5)
+- [x] Added sanity checks to verify:
+  - BPE vocab size
+  - encode/decode roundtrips
+  - compatibility with existing training/sampling code  
+
+**Result:**  
+Tokenization is now explicit, persisted, and swappable without touching model or trainer code.
+
+**Key Learnings:**
+- Tokenizers must be treated as versioned artifacts.
+- Clean abstractions dramatically reduce downstream fragility.
+- BPE migration should only happen after system correctness is established.
+
+---
+
+### Day 9 (Dec 16) — BPE Base LM Training (from Scratch) ✅  
+**Phase 4 → Phase 5 — New Base Model**
+
+- [x] Trained a new base language model from scratch using BPE:
+  - `vocab_size ≈ 7.5k`
+  - `block_size = 128`
+  - Reduced model size for CPU feasibility (96-dim, 3 layers, 3 heads)
+- [x] Debugged and fixed multiple training-loop bugs:
+  - Incorrect checkpoint save scope (`ckpt` uninitialized)
+  - Duplicate checkpoint writers
+  - Char-specific metadata leaking into BPE runs
+- [x] Refactored checkpoint format:
+  - Char runs embed `stoi/itos`
+  - BPE runs store a pointer to `tokenizer_bpe.json`
+- [x] Successfully ran full BPE training (1500 iters on CPU):
+  - Train loss decreased from ~9.07 → ~6.10
+  - Validation loss tracked reasonably (~7.65)
+  - Periodic checkpoints saved cleanly  
+
+**Result:**  
+A fully working BPE-based base LM checkpoint (`vibejam_bpe_personal.pt`) produced from scratch.
+
+**Key Learnings:**
+- Block size is architectural; mismatches invalidate checkpoints.
+- Checkpoint logic must have exactly one authority.
+- BPE dramatically reduces “spelling burden,” even in small models.
+
+---
+
+### Day 10 (Dec 16) — BPE Inference, Release Prep & Reflection ✅  
+**Phase 5 — Stabilization & Release**
+
+- [x] Updated `rewrite_demo.py` to support:
+  - `--tokenizer-type bpe`
+  - loading `BPETokenizer` + `TokenDataset` for inference
+- [x] Successfully ran rewrite inference using the BPE base model:
+  - Outputs still prototype-grade but structurally more word-like than char-level
+- [x] Completed Layer 1.5 goals:
+  - Correct, reproducible pipeline
+  - BPE-based base training
+  - Working inference path
+- [x] Reflected on the development process:
+  - Identified that the majority of effort went into system correctness
+  - Confirmed BPE was the right next step *after* fixing fundamentals
+- [x] Prepared repo for GitHub release:
+  - Updated README to reflect actual architecture and capabilities
+  - Documented lessons learned and architectural decisions
+  - Positioned BPE rewrite fine-tuning as the next post-release milestone  
+
+**Result:**  
+vibejam v0.1 is ready for release as a clean, honest, learning-focused systems ML project.
+
+**Key Learnings:**
+- Shipping a correct system beats chasing output quality too early.
+- BPE migration is straightforward *only* when abstractions are clean.
+- A small, well-understood model is a better foundation than a large, opaque one.
+
+---
+
+## Current Status
+
+- **Layer 1:** Complete  
+- **Layer 1.5 (BPE):** Complete (base training + inference)  
+- **Layer 2:** Not started (intentionally)  
+- **Layer 3:** Not started  
+
+---
+
+## Next (Layer 1.5 and Layer 2 Start)
+
+**Short-Term (Layer 1.5 — Better Style Modeling / Make Rewrite Real)**
+
+- [x] Introduce BPE tokenizer (byte-level) + persist tokenizer artifact
+- [x] Make dataset tokenizer-agnostic (`TokenDataset`) and train a BPE base LM checkpoint
+- [ ] Improve rewrite inference hygiene (base model):
+      - lower temperature / top-k defaults for rewrite
+      - add guardrails against newline/whitespace loops
+      - add a small fixed “rewrite eval set” (10 drafts) for consistent comparison
+- [ ] BPE rewrite fine-tuning (this is the big quality jump):
+      - regenerate clean `rewrite_pairs.txt` in canonical format:
+            Draft:\n...\n\nRewrite:\n...\n<|end|>\n
+      - update `train_rewrite_finetune.py` to use BPETokenizer + TokenDataset
+      - fine-tune from `checkpoints/vibejam_bpe_personal.pt`
+      - add early stopping / save-best-val checkpoint
+- [ ] Optional: selective fine-tuning ladder (only after full FT works):
+      - freeze lower blocks / tune head
+      - lightweight adapters (LoRA-style, minimal)
+
+**Medium-Term (Layer 2 — Model Interface & Big LLM Integration)**
+
+- [ ] Introduce a minimal `BaseLM` interface:
+      - forward(idx, targets) -> logits/loss
+      - generate(idx, ...) -> idx
+      - save/load
+- [ ] Add `build_model(arch, cfg)` factory:
+      - transformer baseline (existing GPTModel)
+      - labs models registered without touching stable code
+- [ ] Wrap vibejam as a `StyleEngine`:
+      - big LLM generates content (semantics)
+      - vibejam rewrites into personal style (tone/cadence)
+- [ ] Add a side-by-side comparison script:
+      - draft vs vibejam rewrite vs (optional) human edit
+
+**Long-Term (Layer 3 — Labs)**
+
+- [ ] Create `labs/` experiments with shared harness:
+      - RWKV-lite baseline (fast first non-attention plug-in)
+      - Mamba-style SSM block (later; higher complexity)
+- [ ] Add slice-based evaluation for style tasks:
+      - short drafts vs long drafts
+      - bullet-heavy vs narrative
+      - “semantic fidelity” stress tests
+
+---

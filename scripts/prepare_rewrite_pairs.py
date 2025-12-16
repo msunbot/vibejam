@@ -4,14 +4,7 @@ from pathlib import Path
 
 DOC_SEP = "<|doc_end|>"
 
-TEMPLATE = """
-        <|sample|>
-        Draft:
-        {draft}
-        Rewrite:
-        {rewrite}
-        <|end|>
-        """
+TEMPLATE = "Draft:\n{draft}\n\nRewrite:\n{rewrite}\n<|end|>\n"
 
 def split_into_chunks(text: str, min_chars: int, max_chars: int):
     """
