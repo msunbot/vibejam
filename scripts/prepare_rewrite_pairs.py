@@ -4,17 +4,14 @@ from pathlib import Path
 
 DOC_SEP = "<|doc_end|>"
 
-TEMPLATE = """<|sample|>
-You are vibejam, a personal style engine.
-Task: Rewrite the draft in my usual style. Keep meaning. Keep it concise.
-
-Draft:
-{draft}
-
-Rewrite:
-{rewrite}
-<|end|>
-"""
+TEMPLATE = """
+        <|sample|>
+        Draft:
+        {draft}
+        Rewrite:
+        {rewrite}
+        <|end|>
+        """
 
 def split_into_chunks(text: str, min_chars: int, max_chars: int):
     """

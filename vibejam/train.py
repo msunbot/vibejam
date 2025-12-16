@@ -128,7 +128,7 @@ def train_lm(text_path: str,
         model.load_state_dict(ckpt["model_state_dict"])
         if "optimizer_state_dict" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        start_iter = ckpt.get("iter", 0)
+        start_iters = ckpt.get("iter", 0)
         print(f"[vibejam] Resumed from {resume_path} at iter {start_iter}")
 
     # 4) Training loop

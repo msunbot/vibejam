@@ -5,13 +5,7 @@ from .data import CharDataset
 from .sample import generate_text
 
 # Simple prompt template for rewrite mode
-REWRITE_PROMPT = (
-    "Below is some draft text. Rewrite it in my usual style, keeping the same meaning "
-    "but using my tone and cadence.\n\n"
-    "Draft:\n"
-    "{draft}\n\n"
-    "Rewrite:\n"
-)
+REWRITE_PROMPT = "<|sample|>\nDraft:\n{draft}\nRewrite:\n"
 
 def build_rewrite_prompt(draft: str) -> str:
     """Format the rewrite instruction prompt around the draft."""
@@ -43,13 +37,22 @@ def rewrite_text(
         temperature=temperature,
         top_k=top_k,
     )
-
-    # Extract only the rewritten portion (after "Rewrite:\n")
     marker = "Rewrite:\n"
-    idx = full.find(marker)
-    if idx == -1:
-        # Fallback: if marker not found, just return everything
-        return full
+    end_marker = "<|end|>"
 
-    rewritten = full[idx + len(marker):]
+    # If the model re-generated the template, keep the LAST rewrite section
+    last_idx = full.rfind(marker)
+    if last_idx == -1:
+        return full.strip()
+
+    rewritten = full[last_idx + len(marker):]
+
+    # Stop at end marker if present
+    end_idx = rewritten.find(end_marker)
+    if end_idx != -1:
+        rewritten = rewritten[:end_idx]
+
+    # Light cleanup: remove any accidental template tokens
+    rewritten = rewritten.replace("<|sample|>", "").strip()
+
     return rewritten.strip()
