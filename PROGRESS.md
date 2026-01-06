@@ -383,3 +383,118 @@ vibejam v0.1 is ready for release as a clean, honest, learning-focused systems M
       - “semantic fidelity” stress tests
 
 ---
+---
+
+## Week 3: Layer 2 Interface + Layer 3 Labs (Days 1–6)
+
+### Day 1 (Jan 6) — Layer 2 Minimal Model Interface ✅ 
+**Phase 6 — Architecture Decoupling**
+
+- [x] Introduced a minimal, duck-typed `BaseLM` interface:
+  - `forward(idx, targets) -> logits, loss`
+  - `get_block_size()`
+  - `configure_optimizers(train_cfg)`
+- [x] Implemented `build_model(arch, cfg)` factory:
+  - Registered existing Transformer as `arch="gpt"`
+  - Ensured all model construction flows through the factory
+- [x] Refactored all scripts to be architecture-agnostic:
+  - `train_lm.py`
+  - `sample_lm.py`
+  - `rewrite_demo.py`
+  - `train_rewrite_finetune.py`
+- [x] Removed all direct imports of `GPTModel` from scripts
+- [x] Verified **no behavior change** for GPT baseline:
+  - Training, sampling, and rewrite demos run identically with `--arch gpt`
+
+**Result:**  
+A clean separation between *training/eval harness* and *model architecture*, enabling post-Transformer experiments without touching stable code.
+
+**Key Learnings:**
+- A tiny interface is enough; anything more would slow experimentation.
+- Optimizer ownership belongs to the model when architectures diverge.
+- This step unlocks all future labs with near-zero marginal plumbing cost.
+
+---
+
+### Day 2 (Jan 6) — Rewrite Evaluation Hygiene & Checkpoint Discipline ✅  
+**Phase 6 → Phase 7 — Making Comparisons Real**
+
+- [x] Stabilized rewrite inference behavior:
+  - Added temperature / top-k defaults suitable for rewrite
+  - Added newline / whitespace runaway guards
+  - Added optional seeded sampling for repeatability
+- [x] Created a fixed rewrite eval set:
+  - `data/eval_rewrite.jsonl` (≈10 drafts)
+  - Used consistently across runs and architectures
+- [x] Implemented `scripts/eval_rewrite.py`:
+  - Deterministic rewrite evaluation
+  - Side-by-side console output
+  - JSONL artifact for later comparison
+- [x] Upgraded rewrite fine-tuning to save **best-val** checkpoints:
+  - `*.last.pt` (always saved)
+  - `*.best.pt` (only when validation improves)
+  - Prevents silent overfitting
+- [x] Migrated rewrite fine-tune script to Layer-2 interface (`build_model`, `arch`)
+
+**Result:**  
+Rewrite quality can now be compared meaningfully across checkpoints and architectures.  
+Sampling noise and overfitting no longer dominate conclusions.
+
+**Key Learnings:**
+- Without a fixed eval set, “progress” is mostly illusion.
+- Seeded sampling is mandatory for architecture comparisons.
+- Checkpoint discipline is part of model quality, not an afterthought.
+
+---
+
+### Day 3–6 (Jan 6) — Layer 3 Lab #1: RWKV-lite (True Post-Transformer) 🚧  
+**Phase 7 — Recurrence & State Without Attention**
+
+- [x] Created `vibejam/labs/` as a first-class experiment space
+- [x] Implemented **RWKV-lite** architecture:
+  - No attention
+  - Explicit recurrent state
+  - Decaying, normalized key-value memory (a/b accumulator)
+- [x] Registered RWKV-lite via `build_model(arch="rwkv_lite")`
+- [x] Verified RWKV-lite runs end-to-end with the same harness:
+  - `scripts/train_lm.py --arch rwkv_lite`
+  - `scripts/sample_lm.py --arch rwkv_lite`
+- [x] Added a diagnostic for *effective memory*:
+  - Average decay half-life (in tokens) printed at runtime
+- [x] Identified and fixed a critical failure mode:
+  - Initial decay caused half-life ≈ 0.9 tokens (effectively memoryless)
+  - Re-initialized decay to target ≈16-token half-life
+  - Observed learned half-life ≈8–10 tokens during training
+- [x] Verified RWKV-lite trains smoothly:
+  - Rapid initial loss drop (learning local statistics)
+  - Continued steady improvement through 1k+ iterations
+- [x] Compared RWKV-lite vs GPT under identical sampling conditions:
+  - Same prompt
+  - Same temperature / top-k
+  - Same random seed
+
+**Current Qualitative Result:**  
+RWKV-lite produces mostly English, corpus-recognizable outputs with local coherence.  
+Still weaker than GPT on long-range structure (expected), but clearly benefits from learned recurrence.
+
+**Key Learnings:**
+- Recurrence is extremely sensitive to decay initialization.
+- “State” must have a usable time constant or it collapses into noise.
+- RWKV-style memory trades exact retrieval for cheap, compressive temporal mixing.
+- Attention remains superior for precise long-range structure at small scales.
+
+**Status:**  
+RWKV-lite lab is **functionally complete** and suitable for documentation as a Layer 3 experiment.
+
+---
+
+## Updated Current Status
+
+- **Layer 1:** Complete  
+- **Layer 1.5 (Rewrite + Eval Hygiene):** Complete  
+- **Layer 2 (Model Interface):** Complete  
+- **Layer 3 (Labs):** In progress  
+  - RWKV-lite: implemented, trained, and analyzed
+  - MoE-FFN: next
+
+---

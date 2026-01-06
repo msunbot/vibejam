@@ -1,21 +1,30 @@
+# scripts/train_rewrite_finetune.py
+
 import argparse
 from pathlib import Path
 import torch
 
 from vibejam.config import ModelConfig, TrainConfig, DataConfig
 from vibejam.data import CharDataset, CharDatasetWithVocab, TokenDataset
-from vibejam.model import GPTModel
 from vibejam.train import estimate_loss, get_batch
 
 from vibejam.tokenizer_bpe import BPETokenizer
 from vibejam.tokenizer_char import CharTokenizer
+
+# [Layer2] Architecture-agnostic build + interface
+from vibejam.build import build_model
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--pairs-path", type=str, required=True, help="data/rewrite_pairs.txt")
     p.add_argument("--base-ckpt", type=str, required=True, help="pretrained LM ckpt")
-    p.add_argument("--out-ckpt", type=str, required=True, help="fine-tuned ckpt path")
+
+    # Keep existing flag, but we will interpret it as a *prefix* now:
+    # - If you pass checkpoints/rewrite_ft.pt, we will write:
+    #   - checkpoints/rewrite_ft.last.pt
+    #   - checkpoints/rewrite_ft.best.pt
+    p.add_argument("--out-ckpt", type=str, required=True, help="fine-tuned ckpt path (prefix)")
 
     # If not provided, we will default to base checkpoint block_size for compatibility.
     p.add_argument("--block-size", type=int, default=None)
@@ -36,7 +45,26 @@ def parse_args():
     # For char runs: used to rebuild the same vocab if vocab_path is missing
     p.add_argument("--corpus-path", type=str, default="data/personal_corpus.txt")
 
+    # [BestVal] Optional: disable best checkpointing (rarely useful)
+    p.add_argument("--no-save-best", action="store_true", help="If set, only save last checkpoint")
+
     return p.parse_args()
+
+
+def _resolve_ckpt_paths(out_ckpt_arg: str):
+    """
+    If user passes:
+      checkpoints/rewrite_ft.pt  -> we write rewrite_ft.last.pt / rewrite_ft.best.pt
+      checkpoints/rewrite_ft     -> we write rewrite_ft.last.pt / rewrite_ft.best.pt
+    """
+    out = Path(out_ckpt_arg)
+    if out.suffix == ".pt":
+        prefix = out.with_suffix("")  # drop .pt
+    else:
+        prefix = out
+    last_path = prefix.with_suffix(".last.pt")
+    best_path = prefix.with_suffix(".best.pt")
+    return last_path, best_path
 
 
 def main():
@@ -47,6 +75,11 @@ def main():
 
     # Load base checkpoint (architecture + weights)
     base = torch.load(args.base_ckpt, map_location="cpu")
+
+    # [Layer2] Determine architecture from checkpoint; default to gpt for older ckpts
+    arch = base.get("arch", "gpt")
+    print("[vibejam] base arch:", arch)
+
     base_model_cfg = ModelConfig(**base["model_cfg"])
 
     # Default block_size to base checkpoint block_size (must match for strict load)
@@ -109,13 +142,12 @@ def main():
         n_head=base_model_cfg.n_head,
         dropout=base_model_cfg.dropout,
     )
-    model = GPTModel(model_cfg).to(device)
 
-    # Strict load should work (same vocab_size, same block_size, same architecture)
+    # [Layer2] Build model via factory and strict load weights
+    model = build_model(arch, model_cfg).to(device)
     model.load_state_dict(base["model_state_dict"], strict=True)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
+    # Optimizer: use interface (matches Day 1 philosophy)
     train_cfg = TrainConfig(
         batch_size=args.batch_size,
         learning_rate=args.lr,
@@ -123,11 +155,21 @@ def main():
         eval_interval=args.eval_interval,
         eval_iters=args.eval_iters,
         device=device,
-        ckpt_path=args.out_ckpt,
+        ckpt_path=None,  # we manage paths ourselves (best/last)
     )
+    optimizer = model.configure_optimizers(train_cfg)
 
-    out_path = Path(args.out_ckpt)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve output paths
+    last_path, best_path = _resolve_ckpt_paths(args.out_ckpt)
+    last_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print("[vibejam] will save last ->", str(last_path))
+    if not args.no_save_best:
+        print("[vibejam] will save best ->", str(best_path))
+
+    # [BestVal] Track best validation loss
+    best_val = float("inf")
+    best_iter = -1
 
     # Training loop
     for it in range(train_cfg.max_iters):
@@ -145,9 +187,15 @@ def main():
         # Log + save periodically
         if it % train_cfg.eval_interval == 0 or it == train_cfg.max_iters - 1:
             losses = estimate_loss(model, dataset, train_cfg)
-            print(f"iter {it:5d} | train {losses['train']:.3f} | val {losses['val']:.3f}")
+            val_loss = float(losses["val"])
+            print(
+                f"iter {it:5d} | train {losses['train']:.3f} | val {val_loss:.3f} "
+                f"| best {best_val:.3f} @ {best_iter}"
+            )
 
+            # Common checkpoint payload
             ckpt = {
+                "arch": arch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "iter": it,
@@ -156,8 +204,19 @@ def main():
                 "data_cfg": data_cfg.__dict__,
                 "tokenizer": tokenizer_meta,
             }
-            torch.save(ckpt, args.out_ckpt)
-            print(f"[vibejam] Saved finetune ckpt: {args.out_ckpt}")
+
+            # Always save "last"
+            torch.save(ckpt, last_path)
+            print(f"[vibejam] Saved finetune ckpt (last): {last_path}")
+
+            # Save "best" if validation improved (and val is a number)
+            if (not args.no_save_best) and (val_loss == val_loss) and (val_loss < best_val):
+                best_val = val_loss
+                best_iter = it
+                torch.save(ckpt, best_path)
+                print(f"[vibejam] Saved finetune ckpt (best): {best_path}")
+
+    print(f"[vibejam] done. best val={best_val:.4f} @ iter={best_iter} (saved to {best_path if not args.no_save_best else 'N/A'})")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,8 @@ import torch
 
 from .config import ModelConfig, TrainConfig, DataConfig
 from .data import CharDataset, TokenDataset
-from .model import GPTModel
+from .build import build_model
+from .lm_interface import BaseLM
 
 from vibejam.tokenizer_bpe import BPETokenizer
 from vibejam.tokenizer_char import CharTokenizer
@@ -63,7 +64,7 @@ def get_batch(
 
 @torch.no_grad()
 def estimate_loss(
-    model: GPTModel,
+    model: BaseLM,
     dataset: Any,
     train_cfg: TrainConfig,
 ) -> dict:
@@ -106,6 +107,7 @@ def train_lm(
     model_cfg: ModelConfig,
     train_cfg: TrainConfig,
     data_cfg: DataConfig,
+    arch: str = "gpt",
     resume_path: str | None = None,
     grad_clip: float | None = 1.0,
 ):
@@ -119,6 +121,7 @@ def train_lm(
     """
     device = get_device(train_cfg)
     print(f"[vibejam] Using device: {device}")
+    print(f"[vibejam] arch = {arch}")
 
     # 1) Dataset
     dataset = load_dataset_from_file(text_path, data_cfg)
@@ -149,9 +152,9 @@ def train_lm(
         dropout=model_cfg.dropout,
     )
 
-    # 4) Model & optimizer
-    model = GPTModel(model_cfg).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg.learning_rate)
+    # 4) Model & optimizer (architecture-agnostic)
+    model = build_model(arch, model_cfg).to(device)
+    optimizer = model.configure_optimizers(train_cfg)
 
     print("[vibejam] Model config:", asdict(model_cfg))
     print("[vibejam] Train config:", asdict(train_cfg))
@@ -195,6 +198,7 @@ def train_lm(
 
             if train_cfg.ckpt_path:
                 ckpt = {
+                    "arch": arch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "iter": it,

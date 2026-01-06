@@ -13,6 +13,9 @@ def parse_args():
     p.add_argument("--ckpt-path", type=str, default=None)
     p.add_argument("--resume-path", type=str, default=None)
 
+    # Layer 2: architecture selection
+    p.add_argument("--arch", type=str, default="gpt", help="Model architecture (e.g. gpt)")
+
     # Data
     p.add_argument("--block-size", type=int, default=128)
     p.add_argument("--train-frac", type=float, default=0.95)
@@ -52,10 +55,10 @@ def main():
 
     # 1) Load dataset FIRST (so we can get vocab_size)
     dataset = load_dataset_from_file(args.text_path, data_cfg)
-    
+
     # 2) Now that dataset is loaded, we can construct model config
     model_cfg = ModelConfig(
-        vocab_size=dataset.vocab_size,  # Now it's defined
+        vocab_size=dataset.vocab_size,
         block_size=data_cfg.block_size,
         n_embd=args.n_embd,
         n_layer=args.n_layer,
@@ -80,6 +83,7 @@ def main():
         model_cfg=model_cfg,
         train_cfg=train_cfg,
         data_cfg=data_cfg,
+        arch=args.arch,
         resume_path=args.resume_path,
         grad_clip=args.grad_clip,
     )

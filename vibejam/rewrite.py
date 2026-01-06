@@ -1,72 +1,81 @@
 # vibejam/rewrite.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
 
 from vibejam.prompts import REWRITE_STOP, build_rewrite_prompt
 from vibejam.sample import generate_text
 
+
 @dataclass
 class RewriteConfig:
-    temperature: float = 0.7
+    # Defaults optimized for "rewrite" behavior (less chaotic than free sampling)
+    temperature: float = 0.6
     top_k: int = 50
     max_new_tokens: int = 256
-    # Safety: if stop not found, we still extract up to max_new_tokens.
+
+    # Stop control
     stop_str: str = REWRITE_STOP
 
-def extract_rewrite_span(full_text: str, fmt: RewriteFormat) -> str:
-    """
-    full_text contains: Draft... Rewrite... <|end|> ...
-    We return text after fmt.rewrite_tag up to fmt.stop.
-    """
-    key = fmt.rewrite_tag
-    idx = full_text.rfind(key)
-    if idx == -1:
-        # Fallback: return tail (better than nothing)
-        return full_text.strip()
+    # Sampling hygiene
+    max_consecutive_newlines: int = 6
+    seed: int | None = 123  # make eval comparable by default
 
-    after = full_text[idx + len(key):].lstrip("\n").rstrip()
-
-    # Stop token
-    stop_i = after.find(fmt.stop)
-    if stop_i != -1:
-        after = after[:stop_i]
-
-    return after.strip()
 
 def _extract_rewrite(full_text: str) -> str:
-    # 1) Find the last occurrence of "Rewrite:\n"
+    """
+    Extract the "Rewrite:" span from the model output.
+
+    We assume prompts contain a "Rewrite:" tag and an explicit stop token REWRITE_STOP.
+    """
     key = "Rewrite:\n"
     i = full_text.rfind(key)
-    if i != -1: 
+    if i != -1:
         full_text = full_text[i + len(key):]
-    
-    # 2) Truncate at stop token
+
     j = full_text.find(REWRITE_STOP)
-    if j != -1: 
+    if j != -1:
         full_text = full_text[:j]
-    
+
     return full_text.strip()
 
+
 def rewrite_text(
-    model, 
-    dataset, 
+    model: Any,
+    dataset: Any,
     draft: str,
-    prompt: str | None = None, 
-    max_new_tokens: int = 250, 
-    temperature: float = 0.7, 
-    top_k: int | None = 50,
+    prompt: str | None = None,
+    cfg: Optional[RewriteConfig] = None,
+    # Back-compat overrides:
+    max_new_tokens: Optional[int] = None,
+    temperature: Optional[float] = None,
+    top_k: Optional[int] = None,
 ) -> str:
-    if prompt is None: 
+    """
+    Rewrite a draft into vibejam style.
+
+    Priority order:
+      explicit overrides > cfg > defaults
+    """
+    if prompt is None:
         prompt = build_rewrite_prompt(draft)
-    
+
+    if cfg is None:
+        cfg = RewriteConfig()
+
+    mnt = int(max_new_tokens) if max_new_tokens is not None else int(cfg.max_new_tokens)
+    temp = float(temperature) if temperature is not None else float(cfg.temperature)
+    tk = int(top_k) if top_k is not None else int(cfg.top_k)
+
     full = generate_text(
         model=model,
         dataset=dataset,
         prompt=prompt,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_k=top_k,
-        stop_str=REWRITE_STOP,
+        max_new_tokens=mnt,
+        temperature=temp,
+        top_k=tk,
+        stop_str=cfg.stop_str,
+        max_consecutive_newlines=cfg.max_consecutive_newlines,
+        seed=cfg.seed,
     )
     return _extract_rewrite(full)
