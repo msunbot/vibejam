@@ -206,10 +206,28 @@ These are deliberate tradeoffs for an early, learning-focused release.
 - Introduce a BaseLM interface and model factory
 - Clean integration with external LLMs as a style adapter
 
-### Layer 3 (Labs)
-- Alternative architectures (Mamba, gated models, etc.)
-- Experiments in continual and nested learning on personal data
+### Layer 3: Post-Transformer Labs
 
+Layer 3 contains a set of minimal experiments designed to build intuition about post-Transformer architectures while reusing the same training, sampling, and evaluation pipeline.
+
+Included labs:
+
+- **RWKV-lite**: recurrence with explicit state (no attention)
+- **MoE-FFN**: conditional compute via expert routing (attention unchanged)
+
+All labs run under the same scripts and dataset, enabling direct architectural comparison.
+
+See: `docs/layer3_labs.md`
+
+Example comparison:
+
+Use the same prompt, seed, and decoding settings to compare models side-by-side:
+
+- GPT baseline
+- RWKV-lite
+- MoE-FFN (k=1 or k=2)
+
+This design prioritizes understanding architectural tradeoffs over chasing benchmarks.
 ---
 
 ## Progress

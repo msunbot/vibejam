@@ -25,4 +25,8 @@ def build_model(arch: str, cfg: ModelConfig) -> BaseLM:
         from vibejam.labs.rwkv_lite import RWKVLiteLM
         return RWKVLiteLM(cfg)
 
-    raise ValueError(f"Unknown arch='{arch}'. Supported: ['gpt', 'rwkv_lite']")
+    if arch == "moe_ffn":
+        from vibejam.labs.moe_ffn import MoEFFNLM
+        return MoEFFNLM(cfg)
+
+    raise ValueError(f"Unknown arch='{arch}'. Supported: ['gpt', 'rwkv_lite', 'moe_ffn']")
